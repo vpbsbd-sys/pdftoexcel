@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>
+<title>BOQ Excel Converter</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,400..800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: estimator's ledger — narrow file rail on the left, the converted BOQ sheet on the right */
+:root{
+  --paper:#f5f7f3; --sheet:#ffffff; --ink:#1d2b26; --muted:#5e6b63; --rule:#d5ddd6; --band:#e7ede8;
+  --accent:#2f6e4f; --accent-ink:#ffffff; --warn:#a8651a; --warn-bg:#fbeacc; --ok:#2f6e4f; --ok-bg:#dcefe3; --bad:#a33a2c; --bad-bg:#f7dcd6;
+  --f-display:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-body:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-num:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#111714; --sheet:#18201c; --ink:#e2e9e4; --muted:#9aa89f; --rule:#2c3832; --band:#1f2a24;
+  --accent:#6fbf94; --accent-ink:#0d1a13; --warn:#e3a85a; --warn-bg:#3a2d17; --ok:#7fcfa2; --ok-bg:#1d3327; --bad:#ef8f80; --bad-bg:#3c211c; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#111714; --sheet:#18201c; --ink:#e2e9e4; --muted:#9aa89f; --rule:#2c3832; --band:#1f2a24;
+  --accent:#6fbf94; --accent-ink:#0d1a13; --warn:#e3a85a; --warn-bg:#3a2d17; --ok:#7fcfa2; --ok-bg:#1d3327; --bad:#ef8f80; --bad-bg:#3c211c; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45;margin:0}
+.wrap{max-width:1240px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 48px}
+header.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:end;justify-content:space-between;border-bottom:2px solid var(--ink);padding-bottom:14px;margin-bottom:22px}
+h1{font-family:var(--f-display);font-stretch:78%;font-weight:800;font-size:clamp(28px,4.2vw,42px);line-height:1;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h1 span{color:var(--accent)}
+.lede{margin:6px 0 0;color:var(--muted);max-width:62ch}
+.cols-legend{font-family:var(--f-num);font-size:12px;color:var(--muted);display:flex;gap:0;border:1px solid var(--rule);background:var(--sheet)}
+.cols-legend b{font-weight:500;padding:5px 10px;border-right:1px solid var(--rule)}
+.cols-legend b:last-child{border-right:0}
+.grid{display:grid;grid-template-columns:320px minmax(0,1fr);gap:22px;align-items:start}
+@media (max-width:860px){.grid{grid-template-columns:1fr}}
+.rail{display:flex;flex-direction:column;gap:14px}
+.drop{border:1.5px dashed var(--muted);background:var(--sheet);padding:22px 18px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--band)}
+.drop:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.drop strong{display:block;font-family:var(--f-display);font-stretch:85%;font-size:19px;font-weight:700}
+.drop small{color:var(--muted)}
+.btn{font:inherit;font-weight:600;border:1px solid var(--ink);background:var(--ink);color:var(--paper);padding:9px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.btn.alt{background:transparent;color:var(--ink)}
+.btn.accent{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.opts{display:flex;flex-direction:column;gap:6px;font-size:14px}
+.opts label{display:flex;gap:8px;align-items:flex-start;cursor:pointer}
+.opts input{margin-top:3px;accent-color:var(--accent)}
+.label{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.files{display:flex;flex-direction:column;border-top:1px solid var(--rule)}
+.file{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:10px 10px;border-bottom:1px solid var(--rule);cursor:pointer;background:transparent;border-left:3px solid transparent;text-align:left;font:inherit;color:inherit;border-top:0;border-right:0;width:100%}
+.file:hover{background:var(--band)}
+.file[aria-current="true"]{background:var(--sheet);border-left-color:var(--accent)}
+.file .nm{font-weight:600;overflow-wrap:anywhere;min-width:0}
+.file .meta{grid-column:1/-1;font-family:var(--f-num);font-size:12px;color:var(--muted)}
+.chip{font-size:11px;font-weight:600;padding:2px 7px;border-radius:2px;white-space:nowrap;align-self:start}
+.chip.ok{background:var(--ok-bg);color:var(--ok)}
+.chip.warn{background:var(--warn-bg);color:var(--warn)}
+.chip.bad{background:var(--bad-bg);color:var(--bad)}
+.chip.busy{background:var(--band);color:var(--muted)}
+.chip.ex{background:var(--band);color:var(--muted);border:1px dashed var(--muted)}
+.rail .actions{display:flex;flex-direction:column;gap:8px}
+.sheet{background:var(--sheet);border:1px solid var(--rule);min-width:0}
+.sheet-head{padding:16px 18px 12px;border-bottom:1px solid var(--rule);display:flex;flex-wrap:wrap;gap:10px 18px;align-items:start;justify-content:space-between}
+.sheet-head h2{font-family:var(--f-display);font-stretch:85%;font-size:20px;line-height:1.2;margin:0;text-wrap:balance;max-width:60ch}
+.sheet-head .sub{color:var(--muted);font-size:13px;margin-top:3px}
+.tally{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid var(--rule)}
+@media (max-width:560px){.tally{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tally div{padding:10px 18px;border-right:1px solid var(--rule)}
+.tally div:last-child{border-right:0}
+.tally .v{font-family:var(--f-num);font-size:17px;font-variant-numeric:tabular-nums;font-weight:500}
+.tally .v.good{color:var(--ok)} .tally .v.flag{color:var(--warn)}
+.tbl-wrap{overflow-x:auto;max-height:70vh;overflow-y:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th{position:sticky;top:0;background:var(--band);text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--rule);white-space:nowrap;z-index:1}
+td{padding:7px 10px;border-bottom:1px solid var(--rule);vertical-align:top}
+td.n,th.n{text-align:right;font-family:var(--f-num);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.sr{font-family:var(--f-num);color:var(--muted);white-space:nowrap}
+tr.item{cursor:pointer}
+tr.item:hover td{background:var(--band)}
+tr.item:focus-visible td{outline:2px solid var(--accent);outline-offset:-2px}
+tr.head td{font-weight:700}
+tr.sub td.t{padding-left:22px}
+td.t{min-width:220px}
+td.t .title{font-weight:600}
+tr.sub td.t .title{font-weight:500}
+tr.desc td{background:var(--paper);color:var(--muted);font-size:13px;line-height:1.5;padding:10px 14px 12px 46px}
+tr.tot td{font-weight:700;background:var(--band)}
+tr.tot td.lbl{text-align:right}
+.mark{font-size:11px;font-weight:600;padding:1px 6px;border-radius:2px}
+.mark.ok{background:var(--ok-bg);color:var(--ok)}
+.mark.differs{background:var(--warn-bg);color:var(--warn)}
+.empty{padding:22px 18px;display:flex;flex-direction:column;gap:18px}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:0;padding:0;list-style:none;counter-reset:s}
+@media (max-width:640px){.steps{grid-template-columns:1fr}}
+.steps li{counter-increment:s;border-top:2px solid var(--ink);padding-top:8px;font-size:14px}
+.steps li::before{content:counter(s);font-family:var(--f-num);color:var(--accent);font-weight:500;margin-right:8px}
+.note{font-size:13px;color:var(--muted)}
+.warnbox{margin:12px 18px;padding:10px 12px;background:var(--warn-bg);color:var(--warn);font-size:13px}
+.errbox{margin:18px;padding:12px 14px;background:var(--bad-bg);color:var(--bad)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--paper);padding:10px 16px;font-size:14px;max-width:calc(100% - 32px);z-index:20}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>BOQ <span>→</span> Excel</h1>
+      <p class="lede">Turn Bill of Quantity PDFs into working Excel sheets. Amounts become live Qty × Rate formulas, GST and totals recalculate, and every line is checked against the amount printed in the PDF.</p>
+    </div>
+    <div class="cols-legend" aria-label="Columns read from the PDF"><b>Sr.No</b><b>Description</b><b>Qty</b><b>Unit</b><b>Rate</b><b>Amount</b></div>
+  </header>
+
+  <div class="grid">
+    <aside class="rail">
+      <div class="drop" id="drop" tabindex="0" role="button" aria-label="Add BOQ PDF files">
+        <strong>Drop BOQ PDFs here</strong>
+        <small>or click to choose · many files at once</small>
+        <input type="file" id="picker" accept="application/pdf,.pdf" multiple hidden>
+      </div>
+      <div class="opts">
+        <span class="label">Excel options</span>
+        <label><input type="checkbox" id="optDesc" checked> Include full item specification text</label>
+        <label><input type="checkbox" id="optNotes" checked> Add notes and terms found outside the table</label>
+      </div>
+      <div>
+        <span class="label" id="filesLabel">Files</span>
+        <div class="files" id="files" role="list"></div>
+      </div>
+      <div class="actions">
+        <button class="btn accent" id="dlOne" disabled>Download Excel for this file</button>
+        <button class="btn alt" id="dlAll" disabled>Download all in one workbook</button>
+        <p class="note" id="saveNote">Each PDF becomes its own sheet. Files are read in your browser and never uploaded.</p>
+      </div>
+    </aside>
+
+    <section class="sheet" id="sheet" aria-live="polite"></section>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script>
+/* BOQ PDF parser: turns positioned words into BOQ rows. Pure functions, no DOM. */
+const BOQ = (() => {
+  const NUM_RE = /^\(?-?(?:\d{1,3}(?:,\d{2,3})+|\d+)(?:\.\d+)?\)?$|^-?\.\d+$/;
+  const UNIT_RE = /^(sq\.?\s?ft\.?|sft\.?|sqft\.?|s\.?ft\.?|rft\.?|r\.?ft\.?|rmt\.?|r\.?m\.?t?\.?|rm\.?|nos?\.?|no\.?s\.?|sqm\.?|sq\.?\s?m(?:tr|t)?\.?|cum\.?|cu\.?\s?m\.?|cmt\.?|kg\.?|kgs\.?|mt\.?|m\.?|mtr\.?|rmtr\.?|ltr\.?|lit\.?|l\.?s\.?|lump\s?sum|job|set|sets|each|ea\.?|pair|pairs|unit|units|lot|point|points|pt\.?|pts\.?|bag|bags|tonne|ton|qtl|day|days|month|months|hour|hrs?)$/i;
+  const SERIAL_RE = /^(?:\d{1,3}(?:\.\d{1,2}){0,3}[a-z]?|[a-z]|[ivx]{1,5}|\(?[a-z]\)|\(?[ivx]{1,5}\)|\(\d{1,3}\))[.)]?$/i;
+  const SUB_RE = /^\(?([a-z]|[ivx]{1,5})\)?[.)]?$/i;
+  const SUMMARY_RE = /(grand\s*total|sub[\s-]*total|total\s*amount|net\s*amount|^\s*total\b|\btotal\s*(?:rs|cost|value)|\bgst\b|cgst|sgst|igst|\bvat\b|round(?:ed)?\s*off|carried\s*(?:forward|over)|brought\s*forward|\bc\/f\b|\bb\/f\b|\bdiscount\b|\bcess\b|\btax\b)/i;
+  const ENDING_RE = /(grand\s*total|total\s*amount|net\s*amount|cgst|sgst|igst|\bgst\b)/i;
+
+  const num = (s) => {
+    const neg = /^\(.*\)$/.test(s) || s.startsWith('-');
+    const v = parseFloat(s.replace(/[(),\s-]/g, ''));
+    return isNaN(v) ? null : (neg ? -v : v);
+  };
+
+  /** pages: [{width, height, items:[{str, x, y(baseline from bottom), width, fontSize}]}] -> words */
+  function itemsToWords(pages) {
+    const words = [];
+    pages.forEach((pg, pi) => {
+      for (const it of pg.items) {
+        const s = it.str;
+        if (!s || !s.trim()) continue;
+        const cw = it.width / Math.max(1, s.length);
+        const re = /\S+/g; let m;
+        while ((m = re.exec(s))) {
+          const x0 = it.x + m.index * cw;
+          words.push({ t: m[0], x0, x1: x0 + m[0].length * cw, top: pg.height - it.y, page: pi });
+        }
+      }
+    });
+    return words;
+  }
+
+  function toLines(words) {
+    const ws = words.slice().sort((a, b) => a.page - b.page || a.top - b.top || a.x0 - b.x0);
+    const lines = [];
+    for (const w of ws) {
+      const L = lines[lines.length - 1];
+      if (L && L.page === w.page && Math.abs(L.top - w.top) <= 3.2) L.words.push(w);
+      else lines.push({ page: w.page, top: w.top, words: [w] });
+    }
+    for (const L of lines) L.words.sort((a, b) => a.x0 - b.x0);
+    return lines;
+  }
+
+  function findHeader(line) {
+    const w = line.words;
+    const pick = (re) => w.find((x) => re.test(x.t));
+    const qty = pick(/^(qty|quantity|qnty|quan)/i);
+    const rate = pick(/^rate/i);
+    const amount = pick(/^(amount|amt)/i);
+    if (!qty || (!rate && !amount)) return null;
+    const desc = pick(/^(description|particulars?|item|specification|details?|name)/i);
+    const sr = pick(/^(sr|s\.?no|sl|serial|no\.?$|item)/i);
+    const unit = pick(/^(unit|uom)/i);
+    const c = (x) => (x ? { x0: x.x0, x1: x.x1, cx: (x.x0 + x.x1) / 2 } : null);
+    return { qty: c(qty), rate: c(rate), amount: c(amount), unit: c(unit), desc: c(desc), sr: sr && sr !== desc ? c(sr) : null };
+  }
+
+  function sameHeader(line) { return !!findHeader(line) && line.words.length <= 14; }
+
+  function parse(pages) {
+    const words = itemsToWords(pages);
+    const lines = toLines(words);
+    const warnings = [];
+    let hi = lines.findIndex((L) => findHeader(L));
+    if (hi < 0) return { error: 'Could not find the table header (a row with Qty, Rate and Amount). This PDF may be a scanned image or use different column names.' };
+    const H = findHeader(lines[hi]);
+    const numCols = ['qty', 'unit', 'rate', 'amount'].filter((k) => H[k]);
+    const zoneStart = Math.min(...numCols.map((k) => H[k].x0)) - 2;
+    let srEdge;
+    if (H.sr && H.desc) srEdge = Math.min(H.desc.x0 - 1, H.sr.x1 + 8);
+    else if (H.sr) srEdge = H.sr.x1 + 8;
+    else if (H.desc) srEdge = H.desc.x0 - 1;
+    else srEdge = 0;
+
+    const preamble = lines.slice(0, hi).map(lineText);
+    const titleIdx = preamble.findIndex((t) => /bill\s*of\s*quantit|\bb\.?o\.?q\b|schedule\s*of|estimate|abstract|price\s*bid|measurement/i.test(t));
+    const title = titleIdx >= 0 ? preamble[titleIdx] : (preamble[preamble.length - 1] || '');
+    const section = titleIdx >= 0 && titleIdx < preamble.length - 1 ? preamble.slice(titleIdx + 1).join(' ') : '';
+
+    const items = [], summary = [], footer = [], orphans = [];
+    let cur = null, lastMain = null, ended = false, seenEnding = false;
+
+    const nearestCol = (w) => {
+      const cx = (w.x0 + w.x1) / 2;
+      let best = null, bd = Infinity;
+      for (const k of numCols) { const d = Math.abs(H[k].cx - cx); if (d < bd) { bd = d; best = k; } }
+      return best;
+    };
+
+    for (let i = hi + 1; i < lines.length; i++) {
+      const L = lines[i];
+      if (sameHeader(L)) continue;
+      const zone = [], left = [];
+      for (const w of L.words) {
+        const isNum = NUM_RE.test(w.t), isUnit = UNIT_RE.test(w.t);
+        if (w.x1 >= zoneStart && (isNum || isUnit)) zone.push(w); else left.push(w);
+      }
+      // serial token in the Sr column
+      let serial = null;
+      if (left.length && left[0].x1 <= srEdge + 2 && SERIAL_RE.test(left[0].t)) serial = left.shift().t.replace(/[.)]$/, '').replace(/^\(/, '');
+      const text = left.map((w) => w.t).join(' ').trim();
+      const nums = zone.filter((w) => NUM_RE.test(w.t));
+
+      // summary lines (Grand total, GST, Total amount ...)
+      if (!serial && text && SUMMARY_RE.test(text) && nums.length >= 1 && nums.length <= 2) {
+        const amtTok = nums[nums.length - 1];
+        summary.push({ label: text, value: num(amtTok.t) });
+        if (ENDING_RE.test(text)) seenEnding = true;
+        continue;
+      }
+      if (seenEnding && !serial) { ended = true; }
+      if (ended) { const t = lineText(L); if (t) footer.push(t); continue; }
+
+      // data values on this line
+      const vals = {};
+      const isData = zone.length >= 2 || (serial && zone.length >= 1);
+      if (isData) {
+        for (const w of zone) {
+          let k = nearestCol(w);
+          if (!NUM_RE.test(w.t)) k = 'unit';
+          else if (k === 'unit') k = H.qty ? 'qty' : 'rate';
+          if (k === 'unit') vals.unit = vals.unit ? vals.unit + ' ' + w.t : w.t;
+          else if (vals[k] == null) vals[k] = num(w.t);
+          else { // two numbers fell in one column: shift right
+            const order = ['qty', 'rate', 'amount'].filter((x) => H[x]);
+            const nk = order.find((x) => vals[x] == null && order.indexOf(x) > order.indexOf(k));
+            if (nk) vals[nk] = num(w.t);
+          }
+        }
+      } else if (zone.length === 1 && NUM_RE.test(zone[0].t) && nearestCol(zone[0]) === 'amount') {
+        orphans.push({ value: num(zone[0].t), after: items.length });
+      } else {
+        for (const w of zone) left.push(w); // stray number inside text
+      }
+      const textAll = isData || !zone.length ? text : left.sort((a, b) => a.x0 - b.x0).map((w) => w.t).join(' ');
+
+      if (serial) {
+        const sub = lastMain && SUB_RE.test(serial) && !/^\d/.test(serial);
+        const it = { sr: sub ? `${lastMain.sr}(${serial})` : serial, parent: sub ? lastMain.sr : null, title: textAll, lines: [], qty: null, unit: '', rate: null, pdfAmount: null };
+        if (!it.title && cur && cur.lines.length) {
+          // label text vertically centred above the serial: borrow the previous row's trailing lines
+          const near = [];
+          while (cur.lines.length) {
+            const ln = cur.lines[cur.lines.length - 1];
+            if (ln.page === L.page && ln.top >= L.top - 14) near.unshift(cur.lines.pop()); else break;
+          }
+          if (near.length) it.title = near.map((x) => x.t).join(' ');
+        }
+        items.push(it); cur = it; if (!sub) lastMain = it;
+        if (isData) applyVals(it, vals);
+        continue;
+      }
+      if (isData && cur) {
+        if (cur.qty != null && (vals.qty != null) && cur.rate != null) {
+          // a second set of quantities under the same item -> extra row
+          const it = { sr: cur.sr + '.', parent: cur.parent || cur.sr, title: textAll, lines: [], qty: null, unit: '', rate: null, pdfAmount: null };
+          items.push(it); cur = it; applyVals(it, vals); warnings.push(`Item ${it.parent}: an extra quantity row was found and kept as a separate line.`);
+          continue;
+        }
+        applyVals(cur, vals);
+      }
+      if (textAll) { if (cur) cur.lines.push({ t: textAll, page: L.page, top: L.top }); else preamble.push(textAll); }
+    }
+
+    // match amounts that sat on their own line
+    for (const it of items) {
+      if (it.pdfAmount == null && it.qty != null && it.rate != null) {
+        const exp = it.qty * it.rate;
+        const k = orphans.findIndex((o) => Math.abs(o.value - exp) <= Math.max(1, exp * 0.0005));
+        if (k >= 0) { it.pdfAmount = orphans[k].value; orphans.splice(k, 1); }
+      }
+    }
+    for (const o of orphans) warnings.push(`An amount of ${o.value} could not be matched to an item.`);
+
+    for (const it of items) {
+      it.description = joinLines(it.lines.map((x) => x.t));
+      delete it.lines;
+      it.calcAmount = it.qty != null && it.rate != null ? round2(it.qty * it.rate) : null;
+      it.status = it.calcAmount != null && it.pdfAmount != null ? (Math.abs(it.calcAmount - it.pdfAmount) <= 1 ? 'ok' : 'differs') : (it.qty == null && it.rate == null ? 'heading' : 'partial');
+    }
+    const itemsTotal = round2(items.reduce((s, it) => s + (it.calcAmount ?? it.pdfAmount ?? 0), 0));
+    return { title, section, items, summary, preamble, footer, warnings, itemsTotal, columns: Object.keys(H).filter((k) => H[k]) };
+  }
+
+  function applyVals(it, v) {
+    if (v.qty != null && it.qty == null) it.qty = v.qty;
+    if (v.unit && !it.unit) it.unit = v.unit;
+    if (v.rate != null && it.rate == null) it.rate = v.rate;
+    if (v.amount != null && it.pdfAmount == null) it.pdfAmount = v.amount;
+  }
+  const round2 = (x) => Math.round(x * 100) / 100;
+  const lineText = (L) => L.words.map((w) => w.t).join(' ').trim();
+  function joinLines(ls) {
+    let out = '';
+    for (const l of ls) {
+      if (!out) out = l;
+      else if (/[a-z]-$/i.test(out) && /^[a-z]/.test(l)) out = out.slice(0, -1) + l;
+      else out += ' ' + l;
+    }
+    return out.replace(/\s+/g, ' ').trim();
+  }
+
+  return { parse, itemsToWords };
+})();
+if (typeof module !== 'undefined') module.exports = BOQ;
+
+/* Builds an ExcelJS workbook from parsed BOQs. One sheet per PDF, plus an index sheet when there are several. */
+const BOQExcel = (() => {
+  const INR = '[>=10000000]##\\,##\\,##\\,##0.00;[>=100000]##\\,##\\,##0.00;##,##0.00';
+  const INK = 'FF1D2B26', HEAD = 'FFE3EAE4', LINE = 'FFB9C4BC', WARN = 'FFFCE7C3', SUBTLE = 'FF5E6B63';
+  const border = { top: { style: 'thin', color: { argb: LINE } }, left: { style: 'thin', color: { argb: LINE } }, bottom: { style: 'thin', color: { argb: LINE } }, right: { style: 'thin', color: { argb: LINE } } };
+
+  function sheetName(name, used) {
+    let base = name.replace(/\.pdf$/i, '').replace(/[\\/?*[\]:]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 28) || 'BOQ';
+    let n = base, i = 2;
+    while (used.has(n.toLowerCase())) n = `${base.slice(0, 26)} ${i++}`;
+    used.add(n.toLowerCase());
+    return n;
+  }
+  const estLines = (text, width) => Math.max(1, Math.ceil((text || '').length / (width * 1.15)) + ((text || '').match(/\n/g) || []).length);
+
+  function addBoqSheet(wb, name, r, opts) {
+    const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 4 }], pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 } } });
+    const full = opts.fullDescription;
+    ws.columns = [
+      { key: 'sr', width: 7 }, { key: 'item', width: 30 }, { key: 'desc', width: full ? 60 : 8 },
+      { key: 'qty', width: 10 }, { key: 'unit', width: 8 }, { key: 'rate', width: 11 },
+      { key: 'amt', width: 15 }, { key: 'pdf', width: 15 }, { key: 'chk', width: 10 },
+    ];
+    if (!full) ws.getColumn(3).hidden = true;
+    ws.mergeCells('A1:I1');
+    ws.getCell('A1').value = r.title || name;
+    ws.getCell('A1').font = { bold: true, size: 13, color: { argb: INK } };
+    ws.getCell('A1').alignment = { wrapText: true, vertical: 'middle' };
+    ws.getRow(1).height = estLines(r.title, 130) * 18;
+    ws.mergeCells('A2:I2');
+    ws.getCell('A2').value = [r.section, `Source: ${opts.fileName}`].filter(Boolean).join('   ·   ');
+    ws.getCell('A2').font = { italic: true, size: 9, color: { argb: SUBTLE } };
+
+    const hdr = ws.getRow(4);
+    hdr.values = ['Sr. No.', 'Item', 'Description / Specification', 'Qty', 'Unit', 'Rate (₹)', 'Amount (₹)', 'Amount in PDF (₹)', 'Check'];
+    hdr.eachCell((c) => { c.font = { bold: true, color: { argb: INK } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEAD } }; c.border = border; c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; });
+    hdr.height = 30;
+
+    let row = 5;
+    const first = row;
+    for (const it of r.items) {
+      const R = ws.getRow(row);
+      R.getCell(1).value = /^\d+(\.\d+)*$/.test(it.sr) ? Number(it.sr) : it.sr;
+      R.getCell(2).value = it.title || '';
+      if (full) R.getCell(3).value = it.description || '';
+      if (it.qty != null) R.getCell(4).value = it.qty;
+      R.getCell(5).value = it.unit || '';
+      if (it.rate != null) R.getCell(6).value = it.rate;
+      if (it.qty != null && it.rate != null) R.getCell(7).value = { formula: `ROUND(D${row}*F${row},2)`, result: it.calcAmount };
+      else if (it.pdfAmount != null) R.getCell(7).value = it.pdfAmount;
+      if (it.pdfAmount != null) R.getCell(8).value = it.pdfAmount;
+      if (it.pdfAmount != null && it.qty != null && it.rate != null)
+        R.getCell(9).value = { formula: `IF(ABS(G${row}-H${row})<=1,"OK","Differs")`, result: it.status === 'ok' ? 'OK' : 'Differs' };
+      for (let c = 1; c <= 9; c++) {
+        const cell = R.getCell(c);
+        cell.border = border;
+        cell.alignment = { vertical: 'top', wrapText: c <= 3, horizontal: c === 1 || c === 5 || c === 9 ? 'center' : undefined };
+      }
+      R.getCell(4).numFmt = '0.00';
+      R.getCell(6).numFmt = INR; R.getCell(7).numFmt = INR; R.getCell(8).numFmt = INR;
+      if (it.status === 'heading') R.getCell(2).font = { bold: true };
+      else if (!it.parent) R.getCell(2).font = { bold: true, color: { argb: INK } };
+      if (it.status === 'differs') R.getCell(9).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: WARN } };
+      const h = Math.max(estLines(it.title, 30), full ? estLines(it.description, 60) : 1);
+      R.height = Math.min(409, h * 13 + 4);
+      row++;
+    }
+    const last = row - 1;
+
+    // Totals: rebuild the PDF's own summary lines as live formulas
+    row++;
+    const totRow = (label, formula, result, pdfVal, bold) => {
+      const R = ws.getRow(row);
+      ws.mergeCells(`B${row}:F${row}`);
+      R.getCell(2).value = label;
+      R.getCell(2).alignment = { horizontal: 'right' };
+      R.getCell(7).value = formula ? { formula, result } : result;
+      if (pdfVal != null) R.getCell(8).value = pdfVal;
+      if (pdfVal != null && result != null) R.getCell(9).value = { formula: `IF(ABS(G${row}-H${row})<=1,"OK","Differs")`, result: Math.abs(result - pdfVal) <= 1 ? 'OK' : 'Differs' };
+      [2, 7, 8, 9].forEach((c) => { R.getCell(c).border = border; R.getCell(c).font = { bold: !!bold, color: { argb: INK } }; });
+      R.getCell(9).alignment = { horizontal: 'center' };
+      R.getCell(7).numFmt = INR; R.getCell(8).numFmt = INR;
+      if (pdfVal != null && result != null && Math.abs(result - pdfVal) > 1) R.getCell(9).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: WARN } };
+      return row++;
+    };
+    const sumF = `SUM(G${first}:G${last})`;
+    let baseRow = null, baseVal = r.itemsTotal;
+    const taxRows = []; let taxSum = 0;
+    const sm = r.summary || [];
+    if (!sm.some((s) => /grand\s*total|sub[\s-]*total|^\s*total\s*$/i.test(s.label))) baseRow = totRow('Total of items', sumF, r.itemsTotal, null, true);
+    for (const s of sm) {
+      const pct = s.label.match(/(\d+(?:\.\d+)?)\s*%/);
+      if (/grand\s*total|sub[\s-]*total|^\s*total\s*$/i.test(s.label) && !taxRows.length) {
+        baseRow = totRow(s.label, sumF, r.itemsTotal, s.value, true); baseVal = r.itemsTotal;
+      } else if (pct && baseRow) {
+        const v = Math.round(baseVal * parseFloat(pct[1])) / 100;
+        taxRows.push(totRow(s.label, `ROUND(G${baseRow}*${pct[1]}/100,2)`, v, s.value)); taxSum += v;
+      } else if (/total|net/i.test(s.label) && baseRow) {
+        const f = `G${baseRow}` + (taxRows.length ? `+${taxRows.map((x) => `G${x}`).join('+')}` : '');
+        totRow(s.label, f, Math.round((baseVal + taxSum) * 100) / 100, s.value, true);
+      } else totRow(s.label, null, s.value, s.value);
+    }
+    if (opts.notes) {
+      const notes = [...(r.preamble || []), ...(r.footer || [])].filter(Boolean);
+      if (notes.length) {
+        row += 2;
+        ws.getCell(`A${row}`).value = 'Notes and text outside the item table';
+        ws.getCell(`A${row}`).font = { bold: true, color: { argb: SUBTLE } };
+        row++;
+        for (const n of notes) { ws.mergeCells(`A${row}:I${row}`); const c = ws.getCell(`A${row}`); c.value = n; c.alignment = { wrapText: true, vertical: 'top' }; c.font = { size: 9, color: { argb: SUBTLE } }; ws.getRow(row).height = estLines(n, 130) * 12 + 2; row++; }
+      }
+    }
+    ws.pageSetup.printTitlesRow = '4:4';
+    return { ws, totalRow: row };
+  }
+
+  function build(ExcelJS, files, opts = {}) {
+    const o = { fullDescription: true, notes: true, ...opts };
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'BOQ PDF to Excel'; wb.created = new Date();
+    const used = new Set();
+    let index = null;
+    if (files.length > 1) { index = wb.addWorksheet('Index'); used.add('index'); }
+    const rows = [];
+    for (const f of files) {
+      const name = sheetName(f.name, used);
+      addBoqSheet(wb, name, f.result, { ...o, fileName: f.name });
+      const s = f.result.summary || [];
+      const finalTot = s.length ? s[s.length - 1] : null;
+      rows.push([name, f.result.title || '', f.result.items.length, f.result.itemsTotal, finalTot ? finalTot.value : null]);
+    }
+    if (index) {
+      index.columns = [{ width: 30 }, { width: 70 }, { width: 8 }, { width: 16 }, { width: 18 }];
+      index.addRow(['Sheet', 'Title', 'Items', 'Items total (₹)', 'Final total in PDF (₹)']).eachCell((c) => { c.font = { bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEAD } }; c.border = border; });
+      for (const r of rows) {
+        const R = index.addRow(r);
+        R.getCell(1).value = { text: r[0], hyperlink: `#'${r[0].replace(/'/g, "''")}'!A1` };
+        R.getCell(1).font = { color: { argb: 'FF1F5F8B' }, underline: true };
+        R.getCell(2).alignment = { wrapText: true, vertical: 'top' };
+        R.getCell(4).numFmt = INR; R.getCell(5).numFmt = INR;
+        R.eachCell((c) => (c.border = border));
+      }
+    }
+    return wb;
+  }
+  return { build };
+})();
+if (typeof module !== 'undefined') module.exports = BOQExcel;
+
+</script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const state = { files: [], sel: -1, open: new Set() };
+  let uid = 0;
+
+  const inr = (v) => v == null ? '' : v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const qtyf = (v) => v == null ? '' : v.toLocaleString('en-IN', { maximumFractionDigits: 3 });
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => (t.hidden = true), 3200); }
+
+  async function readPdf(file) {
+    const data = new Uint8Array(await file.arrayBuffer());
+    const doc = await pdfjsLib.getDocument({ data }).promise;
+    const pages = []; let chars = 0;
+    for (let i = 1; i <= doc.numPages; i++) {
+      const p = await doc.getPage(i); const vp = p.getViewport({ scale: 1 });
+      const tc = await p.getTextContent();
+      const items = tc.items.filter((it) => it.str !== undefined).map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], width: it.width }));
+      chars += items.reduce((s, it) => s + it.str.trim().length, 0);
+      pages.push({ width: vp.width, height: vp.height, items });
+    }
+    if (chars < 40) return { error: 'This PDF has no readable text. It looks like a scanned image; it needs OCR before it can be converted.' };
+    return BOQ.parse(pages);
+  }
+
+  async function addFiles(list) {
+    const pdfs = [...list].filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+    if (!pdfs.length) { toast('Only PDF files can be converted.'); return; }
+    if (!window.pdfjsLib) { toast('The PDF reader could not load. Check your internet connection and reload.'); return; }
+    for (const f of pdfs) {
+      const entry = { id: ++uid, name: f.name, status: 'busy', result: null };
+      state.files.push(entry);
+      if (state.sel < 0) state.sel = state.files.length - 1;
+      render();
+      try { entry.result = await readPdf(f); entry.status = entry.result.error ? 'bad' : 'done'; }
+      catch (e) { entry.result = { error: 'This file could not be opened as a PDF (' + (e.message || 'unknown error') + ').' }; entry.status = 'bad'; }
+      render();
+    }
+  }
+
+  function counts(r) {
+    const differs = r.items.filter((i) => i.status === 'differs').length;
+    const last = r.summary.length ? r.summary[r.summary.length - 1] : null;
+    const gt = r.summary.find((s) => /grand\s*total|sub[\s-]*total|^\s*total\s*$/i.test(s.label));
+    const totalOk = gt ? Math.abs(gt.value - r.itemsTotal) <= 1 : null;
+    return { differs, last, gt, totalOk, priced: r.items.filter((i) => i.status !== 'heading').length };
+  }
+
+  function chipFor(f) {
+    if (f.status === 'busy') return '<span class="chip busy">Reading…</span>';
+    if (f.status === 'bad') return '<span class="chip bad">Not converted</span>';
+    const c = counts(f.result);
+    if (c.differs || c.totalOk === false || f.result.warnings.length) return '<span class="chip warn">Check</span>';
+    return '<span class="chip ok">Matches PDF</span>';
+  }
+
+  function renderFiles() {
+    const box = $('files');
+    $('filesLabel').textContent = state.files.length ? `Files (${state.files.length})` : 'Files';
+    if (!state.files.length) {
+      box.innerHTML = `<div class="file" role="listitem" aria-current="true" style="cursor:default"><span class="nm">VISHRAMBAG price bid.pdf</span><span class="chip ex">Example</span><span class="meta">35 rows · ₹9,87,741.15</span></div>`;
+      return;
+    }
+    box.innerHTML = state.files.map((f, i) => {
+      const r = f.result; let meta = '';
+      if (f.status === 'done') meta = `${r.items.length} rows · ₹${inr(r.itemsTotal)}`;
+      else if (f.status === 'bad') meta = 'See the message on the right';
+      return `<button class="file" role="listitem" data-i="${i}" aria-current="${i === state.sel}"><span class="nm">${esc(f.name)}</span>${chipFor(f)}<span class="meta">${meta}</span></button>`;
+    }).join('');
+  }
+
+  const EXAMPLE = {
+    title: 'BILL OF QUANTITY FOR FURNITURE WORK (example preview)', section: 'Furniture Works',
+    items: [
+      { sr: '1', title: 'GYPSUM BOARD FALSE CEILING', qty: 669.33, unit: 'Sft.', rate: 70, pdfAmount: 46853.10, calcAmount: 46853.1, status: 'ok', description: 'Providing & fixing suspended false ceiling of 12 mm gypsum board on GI framework…' },
+      { sr: '3', title: 'Low Level Partition For Cubicals', qty: 84.09, unit: 'Sft', rate: 375, pdfAmount: 31533.75, calcAmount: 31533.75, status: 'ok', description: '' },
+      { sr: '13', title: 'Writing Desk', qty: null, unit: '', rate: null, pdfAmount: null, calcAmount: null, status: 'heading', description: '' },
+      { sr: '13(a)', parent: '13', title: 'Writing Ledge at a height of 3\' 6"', qty: 1, unit: 'No', rate: 1500, pdfAmount: 1500, calcAmount: 1500, status: 'ok', description: '' },
+    ],
+    summary: [{ label: 'GRAND TOTAL', value: 79886.85 }, { label: 'Add SGST @ 9%', value: 7189.82 }],
+    itemsTotal: 79886.85, warnings: [],
+  };
+
+  function rowsHtml(r, interactive) {
+    let h = '';
+    r.items.forEach((it, k) => {
+      const cls = ['item', it.status === 'heading' ? 'head' : '', it.parent ? 'sub' : ''].join(' ');
+      const amt = it.calcAmount ?? it.pdfAmount;
+      const mark = it.status === 'ok' ? '<span class="mark ok">OK</span>' : it.status === 'differs' ? `<span class="mark differs" title="PDF shows ₹${inr(it.pdfAmount)}">Differs</span>` : '';
+      const open = interactive && state.open.has(k);
+      h += `<tr class="${cls}" ${interactive && it.description ? `tabindex="0" data-k="${k}" aria-expanded="${open}"` : ''}>
+        <td class="sr">${esc(it.sr)}</td><td class="t"><span class="title">${esc(it.title || '—')}</span></td>
+        <td class="n">${qtyf(it.qty)}</td><td>${esc(it.unit)}</td><td class="n">${inr(it.rate)}</td><td class="n">${inr(amt)}</td><td>${mark}</td></tr>`;
+      if (open) h += `<tr class="desc"><td colspan="7">${esc(it.description)}</td></tr>`;
+    });
+    for (const s of r.summary) h += `<tr class="tot"><td></td><td class="lbl" colspan="4">${esc(s.label)}</td><td class="n">${inr(s.value)}</td><td></td></tr>`;
+    return h;
+  }
+
+  const thead = '<thead><tr><th>Sr.</th><th>Item</th><th class="n">Qty</th><th>Unit</th><th class="n">Rate ₹</th><th class="n">Amount ₹</th><th>Check</th></tr></thead>';
+
+  function renderSheet() {
+    const el = $('sheet');
+    const f = state.files[state.sel];
+    if (!f) {
+      el.innerHTML = `<div class="empty">
+        <ol class="steps"><li>Drop one or many BOQ / price-bid PDFs on the left.</li><li>Review each table here. Rows whose amount doesn't equal Qty × Rate are flagged.</li><li>Download one Excel per PDF, or one workbook with a sheet for each.</li></ol>
+        <span class="label">What a converted BOQ looks like <span class="chip ex">Example</span></span>
+      </div>
+      <div class="tbl-wrap"><table>${thead}<tbody>${rowsHtml(EXAMPLE, false)}</tbody></table></div>
+      <p class="note" style="padding:12px 18px">Works with text-based PDFs exported from Excel or Word that have Sr. No, Description, Qty, Unit, Rate and Amount columns. Scanned PDFs need OCR first. Click any row to see its full specification.</p>`;
+      return;
+    }
+    if (f.status === 'busy') { el.innerHTML = `<div class="sheet-head"><div><h2>${esc(f.name)}</h2><div class="sub">Reading pages…</div></div></div>`; return; }
+    if (f.status === 'bad') { el.innerHTML = `<div class="sheet-head"><div><h2>${esc(f.name)}</h2></div></div><div class="errbox">${esc(f.result.error)}</div>`; return; }
+    const r = f.result, c = counts(r);
+    const finalV = c.last ? c.last.value : null;
+    el.innerHTML = `
+      <div class="sheet-head"><div><h2>${esc(r.title || f.name)}</h2><div class="sub">${esc([r.section, f.name].filter(Boolean).join(' · '))}</div></div></div>
+      <div class="tally">
+        <div><span class="label">Rows</span><div class="v">${r.items.length}</div></div>
+        <div><span class="label">Sum of items</span><div class="v ${c.totalOk === true ? 'good' : c.totalOk === false ? 'flag' : ''}">₹${inr(r.itemsTotal)}</div></div>
+        <div><span class="label">${c.gt ? esc(c.gt.label.toLowerCase()) + ' in PDF' : 'Total in PDF'}</span><div class="v">${c.gt ? '₹' + inr(c.gt.value) : '—'}</div></div>
+        <div><span class="label">Rows to check</span><div class="v ${c.differs ? 'flag' : 'good'}">${c.differs}</div></div>
+      </div>
+      ${c.totalOk === false ? `<div class="warnbox">The items add up to ₹${inr(r.itemsTotal)} but the PDF's ${esc(c.gt.label)} is ₹${inr(c.gt.value)}. Compare the rows with the PDF before using the sheet.</div>` : ''}
+      ${r.warnings.map((w) => `<div class="warnbox">${esc(w)}</div>`).join('')}
+      <div class="tbl-wrap"><table>${thead}<tbody>${rowsHtml(r, true)}</tbody></table></div>
+      <p class="note" style="padding:10px 18px">Click a row to read its full specification. ${finalV != null && c.last !== c.gt ? `Final amount in PDF: ₹${inr(finalV)}.` : ''}</p>`;
+  }
+
+  function render() {
+    renderFiles(); renderSheet();
+    const done = state.files.filter((f) => f.status === 'done');
+    $('dlOne').disabled = !(state.files[state.sel] && state.files[state.sel].status === 'done');
+    $('dlAll').disabled = done.length < 1;
+    $('dlAll').textContent = done.length > 1 ? `Download all ${done.length} in one workbook` : 'Download all in one workbook';
+  }
+
+  async function saveXlsx(files, filename) {
+    if (!window.ExcelJS) { toast('The Excel writer could not load. Check your internet connection and reload.'); return; }
+    const wb = BOQExcel.build(ExcelJS, files, { fullDescription: $('optDesc').checked, notes: $('optNotes').checked });
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    let dl = null;
+    if (window.claude && typeof window.claude.use === 'function') { try { dl = await window.claude.use('downloads'); } catch (e) { dl = null; } }
+    if (dl) {
+      try { const res = await dl.save({ filename, data: blob }); if (res.status === 'saved') toast(`Saved ${filename}`); }
+      catch (e) {
+        if (e && e.code === 'declined') toast('Download cancelled.');
+        else if (e && e.code === 'rate_limited') toast('A save prompt is already open. Finish that one first.');
+        else toast('Saving is not available in this view. Open the page in a browser to download.');
+      }
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast(`Saved ${filename}`);
+  }
+  const xname = (n) => n.replace(/\.pdf$/i, '') + '.xlsx';
+
+  $('dlOne').addEventListener('click', () => { const f = state.files[state.sel]; if (f && f.status === 'done') saveXlsx([f], xname(f.name)); });
+  $('dlAll').addEventListener('click', () => {
+    const done = state.files.filter((f) => f.status === 'done');
+    if (done.length) saveXlsx(done, done.length === 1 ? xname(done[0].name) : `BOQ workbook (${done.length} files).xlsx`);
+  });
+
+  const drop = $('drop'), picker = $('picker');
+  drop.addEventListener('click', () => picker.click());
+  drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); picker.click(); } });
+  picker.addEventListener('change', () => { addFiles(picker.files); picker.value = ''; });
+  ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('drop', (e) => { e.preventDefault(); if (e.target !== drop && !drop.contains(e.target) && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+
+  $('files').addEventListener('click', (e) => { const b = e.target.closest('[data-i]'); if (!b) return; state.sel = +b.dataset.i; state.open.clear(); render(); });
+  const toggle = (tr) => { const k = +tr.dataset.k; state.open.has(k) ? state.open.delete(k) : state.open.add(k); renderSheet(); const again = $('sheet').querySelector(`tr[data-k="${k}"]`); if (again) again.focus(); };
+  $('sheet').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-k]'); if (tr) toggle(tr); });
+  $('sheet').addEventListener('keydown', (e) => { const tr = e.target.closest('tr[data-k]'); if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(tr); } });
+
+  render();
+})();
+</script>
+
+</body></html>
