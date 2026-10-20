@@ -193,13 +193,13 @@ const BOQ = (() => {
   function findHeader(line) {
     const w = line.words;
     const pick = (re) => w.find((x) => re.test(x.t));
-    const qty = pick(/^(qty|quantity|qnty|quan)/i);
-    const rate = pick(/^rate/i);
-    const amount = pick(/^(amount|amt)/i);
-    if (!qty || (!rate && !amount)) return null;
-    const desc = pick(/^(description|particulars?|item|specification|details?|name)/i);
-    const sr = pick(/^(sr|s\.?no|sl|serial|no\.?$|item)/i);
-    const unit = pick(/^(unit|uom)/i);
+    const qty = pick(/^(qty|qnty|quan|quantity|quantities|परिमाण|प्रमाण|संख्या|नग)/i);
+    const rate = pick(/^(rate|rates|दर)/i);
+    const amount = pick(/^(amount|amt|cost|रक्कम|किंमत)/i) || pick(/^total$/i);
+    if (!(qty && (rate || amount)) && !(rate && amount)) return null;
+    const desc = pick(/^(description|particulars?|specification|details?|name|work|वर्णन|तपशील|बाब)/i) || pick(/^item/i);
+    const sr = pick(/^(sr|s\.?no|sl|serial|no\.?$|अ\.?\s?क्र|क्र)/i) || w.find((x) => /^item/i.test(x.t) && x !== desc);
+    const unit = pick(/^(unit|uom|units|एकक|परिमाण\s?एकक)/i);
     const c = (x) => (x ? { x0: x.x0, x1: x.x1, cx: (x.x0 + x.x1) / 2 } : null);
     return { qty: c(qty), rate: c(rate), amount: c(amount), unit: c(unit), desc: c(desc), sr: sr && sr !== desc ? c(sr) : null };
   }
@@ -210,11 +210,30 @@ const BOQ = (() => {
     const words = itemsToWords(pages);
     const lines = toLines(words);
     const warnings = [];
-    let hi = lines.findIndex((L) => findHeader(L));
-    if (hi < 0) return { error: 'Could not find the table header (a row with Qty, Rate and Amount). This PDF may be a scanned image or use different column names.' };
-    const H = findHeader(lines[hi]);
-    // keep the PDF's own column headings, e.g. "Sr.No.", "Qty."
-    const hw = lines[hi].words;
+    // The heading row may be one line, or spread over 2-3 lines when cells wrap ("Sr." / "No.", "Rate" / "(Rs.)")
+    let hi = -1, H = null, hw = null, hStart = -1;
+    // pass 1: a single heading line
+    for (let i = 0; i < lines.length && !H; i++) {
+      const h = findHeader(lines[i]);
+      if (h) { H = h; hw = lines[i].words; hi = hStart = i; }
+    }
+    // pass 2: short lines stacked within ~30pt (wrapped heading cells); long sentences are never headings
+    const shortLine = (L) => L.words.length <= 12 && !L.words.some((x) => NUM_RE.test(x.t) && x.t.length > 1);
+    for (let i = 0; i < lines.length && !H; i++) {
+      if (!shortLine(lines[i])) continue;
+      for (let j = i + 1; j < Math.min(lines.length, i + 4); j++) {
+        if (lines[j].page !== lines[i].page || lines[j].top - lines[i].top > 30 || !shortLine(lines[j])) break;
+        const band = { words: lines.slice(i, j + 1).flatMap((L) => L.words).sort((a, b) => a.x0 - b.x0) };
+        if (findHeader(band)) {
+          let k = j;
+          while (k + 1 < lines.length && lines[k + 1].page === lines[i].page && lines[k + 1].top - lines[k].top < 13 && shortLine(lines[k + 1]) && !lines[k + 1].words.some((x) => /\d/.test(x.t))) k++;
+          const all = { words: lines.slice(i, k + 1).flatMap((L) => L.words).sort((a, b) => a.x0 - b.x0) };
+          H = findHeader(all); hw = all.words; hi = k; hStart = i; break;
+        }
+      }
+    }
+    if (!H) return { error: 'Could not find the table heading row (with Qty, Rate and Amount columns). If you can select text in this PDF, please share it so the converter can learn its column names. If you cannot select text, it is a scanned image and needs OCR first.' };
+    const headTexts = new Set(lines.slice(hStart, hi + 1).map(lineText));
     const labelAt = (c, until) => c ? hw.filter((w) => w.x0 >= c.x0 - 1 && (until == null ? w.x1 <= c.x1 + 1 : w.x1 < until)).map((w) => w.t).join(' ') : '';
     const labels = {
       sr: labelAt(H.sr), desc: labelAt(H.desc, H.qty ? H.qty.x0 : null), qty: labelAt(H.qty), unit: labelAt(H.unit), rate: labelAt(H.rate), amount: labelAt(H.amount),
@@ -227,7 +246,7 @@ const BOQ = (() => {
     else if (H.desc) srEdge = H.desc.x0 - 1;
     else srEdge = 0;
 
-    const preamble = lines.slice(0, hi).map(lineText);
+    const preamble = lines.slice(0, hStart).map(lineText);
     const titleIdx = preamble.findIndex((t) => /bill\s*of\s*quantit|\bb\.?o\.?q\b|schedule\s*of|estimate|abstract|price\s*bid|measurement/i.test(t));
     const title = titleIdx >= 0 ? preamble[titleIdx] : (preamble[preamble.length - 1] || '');
     const section = titleIdx >= 0 && titleIdx < preamble.length - 1 ? preamble.slice(titleIdx + 1).join(' ') : '';
@@ -244,7 +263,7 @@ const BOQ = (() => {
 
     for (let i = hi + 1; i < lines.length; i++) {
       const L = lines[i];
-      if (sameHeader(L)) continue;
+      if (sameHeader(L) || headTexts.has(lineText(L))) continue;
       const zone = [], left = [];
       for (const w of L.words) {
         const isNum = NUM_RE.test(w.t), isUnit = UNIT_RE.test(w.t);
