@@ -79,11 +79,14 @@ tr.item{cursor:pointer}
 tr.item:hover td{background:var(--band)}
 tr.item:focus-visible td{outline:2px solid var(--accent);outline-offset:-2px}
 tr.head td{font-weight:700}
-tr.sub td.t{padding-left:22px}
-td.t{min-width:220px}
-td.t .title{font-weight:600}
+td.t{min-width:260px}
+td.t .title{font-weight:700;display:block}
 tr.sub td.t .title{font-weight:500}
-tr.desc td{background:var(--paper);color:var(--muted);font-size:13px;line-height:1.5;padding:10px 14px 12px 46px}
+td.sr{text-align:center}
+td.u{white-space:nowrap}
+.spec{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--muted);font-size:13px;line-height:1.5;margin-top:2px}
+.spec.open{display:block;-webkit-line-clamp:unset}
+tr.differs td.amt{background:var(--warn-bg);color:var(--warn)}
 tr.tot td{font-weight:700;background:var(--band)}
 tr.tot td.lbl{text-align:right}
 .mark{font-size:11px;font-weight:600;padding:1px 6px;border-radius:2px}
@@ -105,9 +108,9 @@ tr.tot td.lbl{text-align:right}
   <header class="top">
     <div>
       <h1>BOQ <span>→</span> Excel</h1>
-      <p class="lede">Turn Bill of Quantity PDFs into working Excel sheets. Amounts become live Qty × Rate formulas, GST and totals recalculate, and every line is checked against the amount printed in the PDF.</p>
+      <p class="lede">Turn Bill of Quantity PDFs into working Excel sheets. The Excel keeps the PDF's layout, with Sr.No., Description, Qty., Unit, Rate and Amount. Amounts, GST and totals become live formulas.</p>
     </div>
-    <div class="cols-legend" aria-label="Columns read from the PDF"><b>Sr.No</b><b>Description</b><b>Qty</b><b>Unit</b><b>Rate</b><b>Amount</b></div>
+    <div class="cols-legend" aria-label="Columns read from the PDF"><b>Sr.No.</b><b>Description</b><b>Qty.</b><b>Unit</b><b>Rate</b><b>Amount</b></div>
   </header>
 
   <div class="grid">
@@ -119,8 +122,8 @@ tr.tot td.lbl{text-align:right}
       </div>
       <div class="opts">
         <span class="label">Excel options</span>
-        <label><input type="checkbox" id="optDesc" checked> Include full item specification text</label>
-        <label><input type="checkbox" id="optNotes" checked> Add notes and terms found outside the table</label>
+        <label><input type="checkbox" id="optDesc" checked> Include full specification in Description</label>
+        <label><input type="checkbox" id="optNotes" checked> Include guidelines and notes printed above and below the table</label>
       </div>
       <div>
         <span class="label" id="filesLabel">Files</span>
@@ -210,6 +213,12 @@ const BOQ = (() => {
     let hi = lines.findIndex((L) => findHeader(L));
     if (hi < 0) return { error: 'Could not find the table header (a row with Qty, Rate and Amount). This PDF may be a scanned image or use different column names.' };
     const H = findHeader(lines[hi]);
+    // keep the PDF's own column headings, e.g. "Sr.No.", "Qty."
+    const hw = lines[hi].words;
+    const labelAt = (c, until) => c ? hw.filter((w) => w.x0 >= c.x0 - 1 && (until == null ? w.x1 <= c.x1 + 1 : w.x1 < until)).map((w) => w.t).join(' ') : '';
+    const labels = {
+      sr: labelAt(H.sr), desc: labelAt(H.desc, H.qty ? H.qty.x0 : null), qty: labelAt(H.qty), unit: labelAt(H.unit), rate: labelAt(H.rate), amount: labelAt(H.amount),
+    };
     const numCols = ['qty', 'unit', 'rate', 'amount'].filter((k) => H[k]);
     const zoneStart = Math.min(...numCols.map((k) => H[k].x0)) - 2;
     let srEdge;
@@ -325,7 +334,7 @@ const BOQ = (() => {
       it.status = it.calcAmount != null && it.pdfAmount != null ? (Math.abs(it.calcAmount - it.pdfAmount) <= 1 ? 'ok' : 'differs') : (it.qty == null && it.rate == null ? 'heading' : 'partial');
     }
     const itemsTotal = round2(items.reduce((s, it) => s + (it.calcAmount ?? it.pdfAmount ?? 0), 0));
-    return { title, section, items, summary, preamble, footer, warnings, itemsTotal, columns: Object.keys(H).filter((k) => H[k]) };
+    return { title, section, labels, items, summary, preamble, footer, warnings, itemsTotal, columns: Object.keys(H).filter((k) => H[k]) };
   }
 
   function applyVals(it, v) {
@@ -350,11 +359,17 @@ const BOQ = (() => {
 })();
 if (typeof module !== 'undefined') module.exports = BOQ;
 
-/* Builds an ExcelJS workbook from parsed BOQs. One sheet per PDF, plus an index sheet when there are several. */
+/* Builds an ExcelJS workbook laid out like the BOQ PDF: Sr.No. | Description | Qty. | Unit | Rate | Amount.
+   One sheet per PDF, plus an Index sheet when there are several. */
 const BOQExcel = (() => {
   const INR = '[>=10000000]##\\,##\\,##\\,##0.00;[>=100000]##\\,##\\,##0.00;##,##0.00';
-  const INK = 'FF1D2B26', HEAD = 'FFE3EAE4', LINE = 'FFB9C4BC', WARN = 'FFFCE7C3', SUBTLE = 'FF5E6B63';
-  const border = { top: { style: 'thin', color: { argb: LINE } }, left: { style: 'thin', color: { argb: LINE } }, bottom: { style: 'thin', color: { argb: LINE } }, right: { style: 'thin', color: { argb: LINE } } };
+  const BLACK = 'FF000000', GREY = 'FF555555';
+  const thin = { style: 'thin', color: { argb: BLACK } };
+  const border = { top: thin, left: thin, bottom: thin, right: thin };
+  const DESC_W = 75;            // description column width (characters)
+  const CHARS_PER_LINE = 86;    // Arial 10pt in a 75-wide column fits ~92; keep a margin
+  const LINE_PT = 13;           // row height per wrapped line
+  const MAX_LINES = 28;         // keep each row under Excel's 409pt row limit
 
   function sheetName(name, used) {
     let base = name.replace(/\.pdf$/i, '').replace(/[\\/?*[\]:]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 28) || 'BOQ';
@@ -363,107 +378,147 @@ const BOQExcel = (() => {
     used.add(n.toLowerCase());
     return n;
   }
-  const estLines = (text, width) => Math.max(1, Math.ceil((text || '').length / (width * 1.15)) + ((text || '').match(/\n/g) || []).length);
+  const linesOf = (text, cpl) => (text ? String(text).split('\n').reduce((s, l) => s + Math.max(1, Math.ceil(l.length / cpl)), 0) : 0);
+
+  // Split long text into pieces that each fit in one Excel row, breaking at sentence or word ends.
+  function chunk(text, firstBudget, budget) {
+    const out = []; let rest = text || ''; let cap = firstBudget;
+    while (rest.length > cap) {
+      let cut = rest.lastIndexOf('. ', cap);
+      if (cut < cap * 0.6) cut = rest.lastIndexOf(' ', cap);
+      if (cut <= 0) cut = cap;
+      out.push(rest.slice(0, cut + 1).trim());
+      rest = rest.slice(cut + 1).trim();
+      cap = budget;
+    }
+    out.push(rest);
+    return out;
+  }
+
+  // Re-join lines that the PDF wrapped, starting a new paragraph at numbered points and labels
+  const PARA_START = /^(\(?\d{1,2}[.)]|\d{1,2}\s|\(?[ivx]{1,4}\)|[a-h][.)]\s|note\b|amount in|sign|name|date|ex-|place)/i;
+  function paragraphs(lines) {
+    const out = [];
+    for (const l of lines) {
+      if (!l) continue;
+      if (!out.length || PARA_START.test(l) || /[:]$/.test(out[out.length - 1])) out.push(l);
+      else out[out.length - 1] += ' ' + l;
+    }
+    return out;
+  }
 
   function addBoqSheet(wb, name, r, opts) {
-    const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 4 }], pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 } } });
-    const full = opts.fullDescription;
-    ws.columns = [
-      { key: 'sr', width: 7 }, { key: 'item', width: 30 }, { key: 'desc', width: full ? 60 : 8 },
-      { key: 'qty', width: 10 }, { key: 'unit', width: 8 }, { key: 'rate', width: 11 },
-      { key: 'amt', width: 15 }, { key: 'pdf', width: 15 }, { key: 'chk', width: 10 },
-    ];
-    if (!full) ws.getColumn(3).hidden = true;
-    ws.mergeCells('A1:I1');
-    ws.getCell('A1').value = r.title || name;
-    ws.getCell('A1').font = { bold: true, size: 13, color: { argb: INK } };
-    ws.getCell('A1').alignment = { wrapText: true, vertical: 'middle' };
-    ws.getRow(1).height = estLines(r.title, 130) * 18;
-    ws.mergeCells('A2:I2');
-    ws.getCell('A2').value = [r.section, `Source: ${opts.fileName}`].filter(Boolean).join('   ·   ');
-    ws.getCell('A2').font = { italic: true, size: 9, color: { argb: SUBTLE } };
+    const ws = wb.addWorksheet(name, { pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.5, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 } } });
+    ws.columns = [{ width: 8 }, { width: DESC_W }, { width: 10 }, { width: 7 }, { width: 9 }, { width: 14 }];
+    const L = r.labels || {};
+    const base = { name: 'Arial', size: 10 };
+    let row = 1;
 
-    const hdr = ws.getRow(4);
-    hdr.values = ['Sr. No.', 'Item', 'Description / Specification', 'Qty', 'Unit', 'Rate (₹)', 'Amount (₹)', 'Amount in PDF (₹)', 'Check'];
-    hdr.eachCell((c) => { c.font = { bold: true, color: { argb: INK } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEAD } }; c.border = border; c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; });
-    hdr.height = 30;
-
-    let row = 5;
-    const first = row;
-    for (const it of r.items) {
-      const R = ws.getRow(row);
-      R.getCell(1).value = /^\d+(\.\d+)*$/.test(it.sr) ? Number(it.sr) : it.sr;
-      R.getCell(2).value = it.title || '';
-      if (full) R.getCell(3).value = it.description || '';
-      if (it.qty != null) R.getCell(4).value = it.qty;
-      R.getCell(5).value = it.unit || '';
-      if (it.rate != null) R.getCell(6).value = it.rate;
-      if (it.qty != null && it.rate != null) R.getCell(7).value = { formula: `ROUND(D${row}*F${row},2)`, result: it.calcAmount };
-      else if (it.pdfAmount != null) R.getCell(7).value = it.pdfAmount;
-      if (it.pdfAmount != null) R.getCell(8).value = it.pdfAmount;
-      if (it.pdfAmount != null && it.qty != null && it.rate != null)
-        R.getCell(9).value = { formula: `IF(ABS(G${row}-H${row})<=1,"OK","Differs")`, result: it.status === 'ok' ? 'OK' : 'Differs' };
-      for (let c = 1; c <= 9; c++) {
-        const cell = R.getCell(c);
-        cell.border = border;
-        cell.alignment = { vertical: 'top', wrapText: c <= 3, horizontal: c === 1 || c === 5 || c === 9 ? 'center' : undefined };
-      }
-      R.getCell(4).numFmt = '0.00';
-      R.getCell(6).numFmt = INR; R.getCell(7).numFmt = INR; R.getCell(8).numFmt = INR;
-      if (it.status === 'heading') R.getCell(2).font = { bold: true };
-      else if (!it.parent) R.getCell(2).font = { bold: true, color: { argb: INK } };
-      if (it.status === 'differs') R.getCell(9).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: WARN } };
-      const h = Math.max(estLines(it.title, 30), full ? estLines(it.description, 60) : 1);
-      R.height = Math.min(409, h * 13 + 4);
+    const textRow = (text, font, align) => {
+      ws.mergeCells(`A${row}:F${row}`);
+      const c = ws.getCell(`A${row}`);
+      c.value = text; c.font = { ...base, ...font }; c.alignment = { wrapText: true, vertical: 'top', horizontal: align || 'left' };
+      ws.getRow(row).height = Math.max(1, linesOf(text, 118)) * LINE_PT + 2;
       row++;
+    };
+
+    // Text printed above the table (guidelines etc.), as in the PDF
+    if (opts.notes && r.preamble && r.preamble.length) {
+      const pre = paragraphs(r.preamble.filter((t) => t && t !== r.title && t !== r.section));
+      for (const t of pre) textRow(t, { color: { argb: GREY } });
+      if (pre.length) row++;
+    }
+
+    // Title + section rows, inside the table border like the PDF
+    const boxRow = (text, font) => {
+      ws.mergeCells(`A${row}:F${row}`);
+      const c = ws.getCell(`A${row}`);
+      c.value = text; c.font = { ...base, bold: true, ...font }; c.border = border;
+      c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+      ws.getRow(row).height = Math.max(1, linesOf(text, 105)) * 15 + 3;
+      row++;
+    };
+    if (r.title) boxRow(r.title, { size: 11 });
+    if (r.section) boxRow(r.section);
+
+    const hdrRow = row;
+    const hdr = ws.getRow(row);
+    hdr.values = [L.sr || 'Sr.No.', L.desc || 'Description', L.qty || 'Qty.', L.unit || 'Unit', L.rate || 'Rate', L.amount || 'Amount'];
+    hdr.eachCell((c) => { c.font = { ...base, bold: true }; c.border = border; c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; });
+    hdr.height = 18;
+    row++;
+    // no frozen panes: guidelines above the table would lock the top of the screen
+    ws.pageSetup.printTitlesRow = `${hdrRow}:${hdrRow}`;
+
+    const first = row;
+    const budgetFirst = (titleLines) => Math.max(200, (MAX_LINES - titleLines) * CHARS_PER_LINE);
+    for (const it of r.items) {
+      const title = it.title || '';
+      const desc = opts.fullDescription ? (it.description || '') : '';
+      const tLines = linesOf(title, CHARS_PER_LINE * 0.92);
+      const pieces = desc ? chunk(desc, budgetFirst(tLines), MAX_LINES * CHARS_PER_LINE) : [''];
+      pieces.forEach((piece, pi) => {
+        const R = ws.getRow(row);
+        const rich = [];
+        if (pi === 0 && title) rich.push({ text: title, font: { ...base, bold: !it.parent || it.status === 'heading' } });
+        if (piece) rich.push({ text: (rich.length ? '\n' : '') + piece, font: { ...base } });
+        R.getCell(2).value = rich.length ? { richText: rich } : '';
+        if (pi === 0) {
+          R.getCell(1).value = /^\d+$/.test(it.sr) ? Number(it.sr) : (it.parent ? it.sr.replace(/^.*\(([^)]*)\)$/, '$1') : it.sr);
+          if (it.qty != null) R.getCell(3).value = it.qty;
+          R.getCell(4).value = it.unit || '';
+          if (it.rate != null) R.getCell(5).value = it.rate;
+          if (it.qty != null && it.rate != null) R.getCell(6).value = { formula: `ROUND(C${row}*E${row},2)`, result: it.calcAmount };
+          else if (it.pdfAmount != null) R.getCell(6).value = it.pdfAmount;
+        }
+        for (let c = 1; c <= 6; c++) {
+          const cell = R.getCell(c);
+          cell.border = border;
+          if (c !== 2) cell.font = { ...base, bold: c === 1 && !it.parent };
+          cell.alignment = { vertical: 'top', wrapText: c === 2, horizontal: c === 1 || c === 4 ? 'center' : c === 2 ? 'left' : 'right' };
+        }
+        R.getCell(3).numFmt = 'General';
+        R.getCell(5).numFmt = 'General';
+        R.getCell(6).numFmt = INR;
+        const lines = (pi === 0 ? tLines : 0) + linesOf(piece, CHARS_PER_LINE);
+        R.height = Math.min(409, Math.max(1, lines) * LINE_PT + 3);
+        row++;
+      });
     }
     const last = row - 1;
 
-    // Totals: rebuild the PDF's own summary lines as live formulas
-    row++;
-    const totRow = (label, formula, result, pdfVal, bold) => {
+    // Totals in the Description / Amount columns, as printed in the PDF
+    const totRow = (label, formula, result) => {
       const R = ws.getRow(row);
-      ws.mergeCells(`B${row}:F${row}`);
       R.getCell(2).value = label;
-      R.getCell(2).alignment = { horizontal: 'right' };
-      R.getCell(7).value = formula ? { formula, result } : result;
-      if (pdfVal != null) R.getCell(8).value = pdfVal;
-      if (pdfVal != null && result != null) R.getCell(9).value = { formula: `IF(ABS(G${row}-H${row})<=1,"OK","Differs")`, result: Math.abs(result - pdfVal) <= 1 ? 'OK' : 'Differs' };
-      [2, 7, 8, 9].forEach((c) => { R.getCell(c).border = border; R.getCell(c).font = { bold: !!bold, color: { argb: INK } }; });
-      R.getCell(9).alignment = { horizontal: 'center' };
-      R.getCell(7).numFmt = INR; R.getCell(8).numFmt = INR;
-      if (pdfVal != null && result != null && Math.abs(result - pdfVal) > 1) R.getCell(9).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: WARN } };
+      R.getCell(6).value = formula ? { formula, result } : result;
+      for (let c = 1; c <= 6; c++) { R.getCell(c).border = border; R.getCell(c).font = { ...base, bold: true }; }
+      R.getCell(6).numFmt = INR; R.getCell(6).alignment = { horizontal: 'right' };
       return row++;
     };
-    const sumF = `SUM(G${first}:G${last})`;
-    let baseRow = null, baseVal = r.itemsTotal;
-    const taxRows = []; let taxSum = 0;
+    const sumF = `SUM(F${first}:F${last})`;
+    const isBase = (l) => /grand\s*total|sub[\s-]*total|^\s*total\s*$/i.test(l);
     const sm = r.summary || [];
-    if (!sm.some((s) => /grand\s*total|sub[\s-]*total|^\s*total\s*$/i.test(s.label))) baseRow = totRow('Total of items', sumF, r.itemsTotal, null, true);
+    let baseRow = null; const pctRows = []; let pctSum = 0;
+    if (!sm.length || !sm.some((s) => isBase(s.label))) baseRow = totRow('TOTAL', sumF, r.itemsTotal);
     for (const s of sm) {
       const pct = s.label.match(/(\d+(?:\.\d+)?)\s*%/);
-      if (/grand\s*total|sub[\s-]*total|^\s*total\s*$/i.test(s.label) && !taxRows.length) {
-        baseRow = totRow(s.label, sumF, r.itemsTotal, s.value, true); baseVal = r.itemsTotal;
-      } else if (pct && baseRow) {
-        const v = Math.round(baseVal * parseFloat(pct[1])) / 100;
-        taxRows.push(totRow(s.label, `ROUND(G${baseRow}*${pct[1]}/100,2)`, v, s.value)); taxSum += v;
+      if (isBase(s.label) && !pctRows.length) baseRow = totRow(s.label, sumF, r.itemsTotal);
+      else if (pct && baseRow) {
+        const p = parseFloat(pct[1]);
+        pctRows.push(totRow(s.label, `ROUND(F${baseRow}*${p}/100,2)`, Math.round(r.itemsTotal * p) / 100)); pctSum += p;
       } else if (/total|net/i.test(s.label) && baseRow) {
-        const f = `G${baseRow}` + (taxRows.length ? `+${taxRows.map((x) => `G${x}`).join('+')}` : '');
-        totRow(s.label, f, Math.round((baseVal + taxSum) * 100) / 100, s.value, true);
-      } else totRow(s.label, null, s.value, s.value);
+        const f = pctSum ? `ROUND(F${baseRow}*(1+${pctSum}/100),2)` : `F${baseRow}`;
+        totRow(s.label, f, Math.round(r.itemsTotal * (1 + pctSum / 100) * 100) / 100);
+      } else totRow(s.label, null, s.value);
     }
-    if (opts.notes) {
-      const notes = [...(r.preamble || []), ...(r.footer || [])].filter(Boolean);
-      if (notes.length) {
-        row += 2;
-        ws.getCell(`A${row}`).value = 'Notes and text outside the item table';
-        ws.getCell(`A${row}`).font = { bold: true, color: { argb: SUBTLE } };
-        row++;
-        for (const n of notes) { ws.mergeCells(`A${row}:I${row}`); const c = ws.getCell(`A${row}`); c.value = n; c.alignment = { wrapText: true, vertical: 'top' }; c.font = { size: 9, color: { argb: SUBTLE } }; ws.getRow(row).height = estLines(n, 130) * 12 + 2; row++; }
-      }
+
+    // Notes printed after the table
+    if (opts.notes && r.footer && r.footer.length) {
+      row++;
+      for (const n of paragraphs(r.footer)) textRow(n, {});
     }
-    ws.pageSetup.printTitlesRow = '4:4';
-    return { ws, totalRow: row };
+    return ws;
   }
 
   function build(ExcelJS, files, opts = {}) {
@@ -476,14 +531,13 @@ const BOQExcel = (() => {
     const rows = [];
     for (const f of files) {
       const name = sheetName(f.name, used);
-      addBoqSheet(wb, name, f.result, { ...o, fileName: f.name });
+      addBoqSheet(wb, name, f.result, o);
       const s = f.result.summary || [];
-      const finalTot = s.length ? s[s.length - 1] : null;
-      rows.push([name, f.result.title || '', f.result.items.length, f.result.itemsTotal, finalTot ? finalTot.value : null]);
+      rows.push([name, f.result.title || '', f.result.items.length, f.result.itemsTotal, s.length ? s[s.length - 1].value : null]);
     }
     if (index) {
       index.columns = [{ width: 30 }, { width: 70 }, { width: 8 }, { width: 16 }, { width: 18 }];
-      index.addRow(['Sheet', 'Title', 'Items', 'Items total (₹)', 'Final total in PDF (₹)']).eachCell((c) => { c.font = { bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEAD } }; c.border = border; });
+      index.addRow(['Sheet', 'Title', 'Items', 'Items total', 'Final total']).eachCell((c) => { c.font = { bold: true }; c.border = border; });
       for (const r of rows) {
         const R = index.addRow(r);
         R.getCell(1).value = { text: r[0], hyperlink: `#'${r[0].replace(/'/g, "''")}'!A1` };
@@ -586,23 +640,25 @@ if (typeof module !== 'undefined') module.exports = BOQExcel;
     itemsTotal: 79886.85, warnings: [],
   };
 
+  // Preview mirrors the Excel: Sr.No. | Description (name + specification) | Qty. | Unit | Rate | Amount
   function rowsHtml(r, interactive) {
     let h = '';
     r.items.forEach((it, k) => {
-      const cls = ['item', it.status === 'heading' ? 'head' : '', it.parent ? 'sub' : ''].join(' ');
+      const cls = ['item', it.status === 'heading' ? 'head' : '', it.parent ? 'sub' : '', it.status === 'differs' ? 'differs' : ''].join(' ');
       const amt = it.calcAmount ?? it.pdfAmount;
-      const mark = it.status === 'ok' ? '<span class="mark ok">OK</span>' : it.status === 'differs' ? `<span class="mark differs" title="PDF shows ₹${inr(it.pdfAmount)}">Differs</span>` : '';
       const open = interactive && state.open.has(k);
+      const sr = it.parent ? it.sr.replace(/^.*\(([^)]*)\)$/, '$1') : it.sr;
+      const spec = it.description ? `<span class="spec${open ? ' open' : ''}">${esc(it.description)}</span>` : '';
+      const flag = it.status === 'differs' ? ` title="Qty × Rate = ₹${inr(it.calcAmount)}, but the PDF prints ₹${inr(it.pdfAmount)}"` : '';
       h += `<tr class="${cls}" ${interactive && it.description ? `tabindex="0" data-k="${k}" aria-expanded="${open}"` : ''}>
-        <td class="sr">${esc(it.sr)}</td><td class="t"><span class="title">${esc(it.title || '—')}</span></td>
-        <td class="n">${qtyf(it.qty)}</td><td>${esc(it.unit)}</td><td class="n">${inr(it.rate)}</td><td class="n">${inr(amt)}</td><td>${mark}</td></tr>`;
-      if (open) h += `<tr class="desc"><td colspan="7">${esc(it.description)}</td></tr>`;
+        <td class="sr">${esc(sr)}</td><td class="t"><span class="title">${esc(it.title || '')}</span>${spec}</td>
+        <td class="n">${it.qty == null ? '' : it.qty}</td><td class="u">${esc(it.unit)}</td><td class="n">${it.rate == null ? '' : it.rate}</td><td class="n amt"${flag}>${inr(amt)}</td></tr>`;
     });
-    for (const s of r.summary) h += `<tr class="tot"><td></td><td class="lbl" colspan="4">${esc(s.label)}</td><td class="n">${inr(s.value)}</td><td></td></tr>`;
+    for (const s of r.summary) h += `<tr class="tot"><td></td><td class="lbl" colspan="4">${esc(s.label)}</td><td class="n">${inr(s.value)}</td></tr>`;
     return h;
   }
 
-  const thead = '<thead><tr><th>Sr.</th><th>Item</th><th class="n">Qty</th><th>Unit</th><th class="n">Rate ₹</th><th class="n">Amount ₹</th><th>Check</th></tr></thead>';
+  const thead = (L) => { L = L || {}; return `<thead><tr><th>${esc(L.sr || 'Sr.No.')}</th><th>${esc(L.desc || 'Description')}</th><th class="n">${esc(L.qty || 'Qty.')}</th><th>${esc(L.unit || 'Unit')}</th><th class="n">${esc(L.rate || 'Rate')}</th><th class="n">${esc(L.amount || 'Amount')}</th></tr></thead>`; };
 
   function renderSheet() {
     const el = $('sheet');
@@ -612,8 +668,8 @@ if (typeof module !== 'undefined') module.exports = BOQExcel;
         <ol class="steps"><li>Drop one or many BOQ / price-bid PDFs on the left.</li><li>Review each table here. Rows whose amount doesn't equal Qty × Rate are flagged.</li><li>Download one Excel per PDF, or one workbook with a sheet for each.</li></ol>
         <span class="label">What a converted BOQ looks like <span class="chip ex">Example</span></span>
       </div>
-      <div class="tbl-wrap"><table>${thead}<tbody>${rowsHtml(EXAMPLE, false)}</tbody></table></div>
-      <p class="note" style="padding:12px 18px">Works with text-based PDFs exported from Excel or Word that have Sr. No, Description, Qty, Unit, Rate and Amount columns. Scanned PDFs need OCR first. Click any row to see its full specification.</p>`;
+      <div class="tbl-wrap"><table>${thead()}<tbody>${rowsHtml(EXAMPLE, false)}</tbody></table></div>
+      <p class="note" style="padding:12px 18px">Works with text-based PDFs exported from Excel or Word that have Sr. No, Description, Qty, Unit, Rate and Amount columns. Scanned PDFs need OCR first. Click any row to read its full specification.</p>`;
       return;
     }
     if (f.status === 'busy') { el.innerHTML = `<div class="sheet-head"><div><h2>${esc(f.name)}</h2><div class="sub">Reading pages…</div></div></div>`; return; }
@@ -630,8 +686,8 @@ if (typeof module !== 'undefined') module.exports = BOQExcel;
       </div>
       ${c.totalOk === false ? `<div class="warnbox">The items add up to ₹${inr(r.itemsTotal)} but the PDF's ${esc(c.gt.label)} is ₹${inr(c.gt.value)}. Compare the rows with the PDF before using the sheet.</div>` : ''}
       ${r.warnings.map((w) => `<div class="warnbox">${esc(w)}</div>`).join('')}
-      <div class="tbl-wrap"><table>${thead}<tbody>${rowsHtml(r, true)}</tbody></table></div>
-      <p class="note" style="padding:10px 18px">Click a row to read its full specification. ${finalV != null && c.last !== c.gt ? `Final amount in PDF: ₹${inr(finalV)}.` : ''}</p>`;
+      <div class="tbl-wrap"><table>${thead(r.labels)}<tbody>${rowsHtml(r, true)}</tbody></table></div>
+      <p class="note" style="padding:10px 18px">Click a row to read its full specification. Amounts that don't equal Qty × Rate are highlighted. ${finalV != null && c.last !== c.gt ? `Final amount in PDF: ₹${inr(finalV)}.` : ''}</p>`;
   }
 
   function render() {
